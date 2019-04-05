@@ -1,0 +1,463 @@
+// when starting, set these values lower 
+// than the final value to speed up test runs
+
+double Vary = 2;     //sigma squared
+double Varx = 1;
+double ratioV = Vary/Varx;    // equals the variance in Y divided by the variance in X
+int runsPer = 5;  	  // number of datasets (x,y pairs) in each datasheet, or: how many columns of Y data
+int totSheets = 7;	  //35 // total number of sheets of data 35
+int dataLength = 684;//1550;  //3648	// how many rows of Y data on each sheet
+int dataStartRow = 1; // usually 1 but in case you want to skip some early data like say a  filter
+int offsetX = 1;   // where you start your array, default is 1 ( in the resulting matrix, the X direction is top to bottom (aka X offset is ROW offset))
+int offsetY = 1;   //where you start your array, default is 1
+int dataSkip = 1;  // default is 1 for no skip
+
+// these values don't affect the calculation time
+// but are used to label the graphs correctly 
+int startWaveLen = 346;
+int endWaveLen = 1030; 
+
+int i=1;
+int j=1;
+
+range inputWaves = [Book3]Sheet1!col(N);
+
+// the sheet name of the input sheets, each temperature
+// gets its own sheet and all sheets need the same number of runs,
+// so add more at the end as needed.
+// these numbers just help keep track of the total sheets
+
+stringarray datasheets;           
+datasheets.Add("22C"); //1   
+datasheets.Add("33C");       
+datasheets.Add("50CC");       
+datasheets.Add("60C");
+datasheets.Add("70C"); //5
+datasheets.Add("22C-2"); 
+datasheets.Add("42C-2");
+
+// the temperature associated with each sheet,
+// duplicates are OK, add more at the end as needed
+
+stringarray datatemps;
+datatemps.Add("22");//1      
+datatemps.Add("33");        
+datatemps.Add("50");
+datatemps.Add("60");
+datatemps.Add("70");//5
+datatemps.Add("22");
+datatemps.Add("42");
+
+stringarray datacols;     // This describes which columns in each sheet hold the Y data, 
+datacols.Add("AF");        // add more at the end as appropiate.
+datacols.Add("AG");
+datacols.Add("AH");
+datacols.Add("AI");
+datacols.Add("AJ");
+
+
+
+
+// now we get ready to do the heavy lifting by setting some things up, first define a series of arrays to put our output into
+string linfit$ = "Fit2";
+range fitA = [MBook1]linfit$!1;
+range fitB = [MBook1]linfit$!2;
+range fitR = [MBook1]linfit$!3;
+range fitR2 = [MBook1]linfit$!4;
+range sumxx = [MBook1]linfit$!5;
+range sumxy = [MBook1]linfit$!6;
+range sumx = [MBook1]linfit$!7;
+range sumy = [MBook1]linfit$!8;
+range xbar = [MBook1]linfit$!9;
+range ybar = [MBook1]linfit$!10;
+range xdev = [MBook1]linfit$!11;
+range xydev = [MBook1]linfit$!12;
+range xxdev = [MBook1]linfit$!13;
+range yydev = [MBook1]linfit$!14;
+range goodpoints = [MBook1]linfit$!15; // to keep track of how many points we used in each position?
+range MSE = [MBook1]linfit$!16; // to keep track of how many points we used in each position?
+range Sxx = [MBook1]linfit$!17;
+range Sxy = [MBook1]linfit$!18;
+range Syy = [MBook1]linfit$!19;
+range xstar = [MBook1]linfit$!20;
+range SSR = [MBook1]linfit$!21;
+range avgDev = [MBook1]linfit$!22;
+range TempDev = [MBook1]linfit$!24;
+range TempRes = [MBook1]linfit$!25;
+range TempERR = [MBook1]linfit$!26;
+
+fitA[1,1] = 1;
+fitB[1,1] = 1;
+fitR[1,1] = 1;
+fitR2[1,1] = 1;
+sumxx[1,1] = 1;
+sumxy[1,1] = 1;
+sumx[1,1] = 1;
+sumy[1,1] = 1;
+xbar[1,1] = 1;
+ybar[1,1] = 1;
+xdev[1,1] = 1;
+xydev[1,1] = 1;
+xxdev[1,1] = 1;
+yydev[1,1] = 1;
+goodpoints[1,1] = 1;
+MSE[1,1] = 1;
+Sxx[1,1] = 1;
+Sxy[1,1] = 1;
+Syy[1,1] = 1;
+xstar[1,1] = 1;
+SSR[1,1] = 1;
+TempDev[1,1] = 1;
+TempRes[1,1] = 1;
+TempERR[1,1] = 1;
+
+fitA.lname$ = "A, intercept, Fit Parameter";
+fitB.lname$ = "B, slope, Fit Parameter ";
+fitR.lname$ = "Fit goodness R ";
+fitR2.lname$ = " R^2, Fit Goodness ";
+sumxx.lname$ = "Sum(x^2), internal";
+sumxy.lname$ = "Sum(x*y), internal";
+sumx.lname$ = "Sum(x), internal";
+sumy.lname$ = "Sum(y), internal";
+xbar.lname$ = "avg X, internal to R";
+ybar.lname$ = "avg Y, internal to R";
+xdev.lname$ = "X deviation, internal to R";
+xydev.lname$ = "X*Y deviation, internal to R ";
+xxdev.lname$ = "X^2 deviation, internal to R ";
+yydev.lname$ = "Y^2 deviation, internal to R ";
+goodpoints.lname$ = "number of points used of total (to account for bad data points)";
+MSE.lname$ = "mean squared error";
+Sxx.lname$ = "second moment xx";
+Sxy.lname$ = "second moment xy";
+Syy.lname$ = "second moment yy";
+xstar.lname$ = "xstarhat";
+SSR.lname$ = "weighted sum of squared residuals";
+TempDev.lname$ = "STD component of sum of temperature error squared";
+TempRes.lname$ = "Residual component of sum of temperature error squared";
+TempERR.lname$ = "sum of temperature error squared";
+
+
+mdim ms:=linfit$ cols:=dataLength rows:=dataLength x1:=startWaveLen x2:=endWaveLen y1:=startWaveLen y2:=endWaveLen;
+
+// ok here we go through and initialize all the matrices to 0
+for(i=offsetX; i<dataLength; i+=dataSkip) // number of rows per data run
+{
+  for(j=offsetY; j<dataLength; j+=dataSkip) // number of columns per data run
+  {
+    sumxx[i,j] = 0;
+    sumxy[i,j] = 0;
+    sumx[i,j] = 0;
+    sumy[i,j] = 0;
+    xbar[i,j] = 0;
+    ybar[i,j] = 0;
+    xdev[i,j] = 0;
+    xydev[i,j] = 0;
+    xxdev[i,j] = 0;
+    yydev[i,j] = 0;
+    goodpoints[i,j] = 0;
+    MSE[i,j] = 0;
+    Sxx[i,j] = 0;
+    Sxy[i,j] = 0;
+    Syy[i,j] = 0;
+    xstar[i,j] = 0;
+    SSR[i,j] = 0;
+    TempDev[i,j] = 0;
+    TempRes[i,j] = 0;
+    TempERR[i,j] = 0;
+  }
+}
+
+// now we start the heavy lifting, this loop-struct runs over EACH matrix and calculates the 6 value matrices at the bottom
+// here is the first place where a 0 or undefined value start to give us actual trouble
+loop(sheetnum,1,totSheets) // number of different sheets you have
+{
+  string currentdatasheet$ = datasheets.GetAt(sheetnum)$;
+  string strTemp$ = datatemps.GetAt(sheetnum)$;
+  int temp = %(strTemp$);
+  loop(m,1,runsPer)         // number of runs per sheet
+  {
+    range mn = [MBook1]currentdatasheet$!$(m);
+    for(i=offsetX; i<dataLength; i+=dataSkip) // number of rows per data run
+    {
+      for(j=offsetY; j<dataLength; j+=dataSkip) // number of columns per data run
+      {
+        if (!ISNA(mn[i,j]*temp)) // simply say if the datapoint we're about to play with is undefined, just skip it! we'll fix the statistics later
+        {
+          sumxx[i,j] = sumxx[i,j] + temp^2;
+          sumxy[i,j] = sumxy[i,j] + temp*mn[i,j];
+          sumx[i,j] = sumx[i,j] + temp;
+          sumy[i,j] = sumy[i,j] + mn[i,j]; 
+          xbar[i,j] = xbar[i,j] + temp; // needs to be divided by N
+          ybar[i,j] = ybar[i,j] + mn[i,j]; // needs to be divided by N
+          goodpoints[i,j] = goodpoints[i,j] +1; 
+        }
+      }
+    }
+  }
+}
+// here we fix those statistics that broke
+for(i=offsetX; i<dataLength; i+=dataSkip) // number of rows per data run
+{
+  for(j=offsetY; j<dataLength; j+=dataSkip) // number of columns per data run
+  {
+    xbar[i,j] = xbar[i,j]/goodpoints[i,j];
+    ybar[i,j] = ybar[i,j]/goodpoints[i,j];
+  }
+}
+
+loop(sheetnum,1,totSheets) // again the number of sheets you have
+{
+  string currentdatasheet$ = datasheets.GetAt(sheetnum)$;
+  string strTemp$ = datatemps.GetAt(sheetnum)$;
+  int temp = %(strTemp$);
+  loop(m,1,runsPer) //runs per sheet 
+  {
+    range mn = [MBook1]currentdatasheet$!$(m);
+    for(i=offsetX; i<dataLength; i+=dataSkip) // number of rows per data run
+    {
+      for(j=offsetY; j<dataLength; j+=dataSkip) // number of rows per data run
+      {
+        if (!ISNA(mn[i,j]*temp)) // simply say if the datapoint we're about to play with is undefined, just skip it! since we already fixed the stats, this should work perfectly
+        {
+          xdev[i,j]  = xdev[i,j] + (temp - xbar[i,j]);
+          xydev[i,j] = xydev[i,j] + (mn[i,j] - ybar[i,j])*(temp - xbar[i,j]);
+          xxdev[i,j] = xxdev[i,j] + (temp - xbar[i,j])^2;
+          yydev[i,j] = yydev[i,j] + (mn[i,j] - ybar[i,j])^2;
+          Sxx[i,j] = Sxx[i,j] + 1/(goodpoints[i,j]-1)*(temp - xbar[i,j])^2;
+          Sxy[i,j] = Sxy[i,j] + 1/(goodpoints[i,j]-1)*(mn[i,j] - ybar[i,j])*(temp - xbar[i,j]);
+          Syy[i,j] = Syy[i,j] + 1/(goodpoints[i,j]-1)*(mn[i,j] - ybar[i,j])^2;
+
+        }
+      }
+    }
+  }
+}
+
+
+// this should require no change other than subbing all mentions of N with "goodpoints[i,j]"
+for(i=offsetX; i<dataLength; i+=dataSkip)// number of rows per data run
+{
+  for(j=offsetY; j<dataLength; j+=dataSkip) // number of rows per data run
+  {
+    Vary = avgDev[i,j]^2;
+    ratioV = Vary^2/Varx^2;
+    fitB[i,j]=(Syy[i,j]-ratioV*Sxx[i,j]+sqrt((Syy[i,j]-ratioV*Sxx[i,j])^2+4*ratioV*Sxy[i,j]^2))/(2*Sxy[i,j]);
+    fitA[i,j]=ybar[i,j]-fitB[i,j]*xbar[i,j];
+    fitR[i,j] = xydev[i,j]/(sqrt(xxdev[i,j])*sqrt(yydev[i,j]));
+    fitR2[i,j] = fitR[i,j]^2;
+  }
+}
+
+loop(sheetnum,1,totSheets) // last time we need to loop over everything i swear
+{
+  string currentdatasheet$ = datasheets.GetAt(sheetnum)$;
+  string strTemp$ = datatemps.GetAt(sheetnum)$;
+  int temp = %(strTemp$);
+  loop(m,1,runsPer) //runs per sheet 
+  {
+    range mn = [MBook1]currentdatasheet$!$(m);
+    for(i=offsetX; i<dataLength; i+=dataSkip) // number of rows per data run
+    {
+      for(j=offsetY; j<dataLength; j+=dataSkip) // number of rows per data run
+      {
+        if (!ISNA(mn[i,j]*temp)) // simply say if the datapoint we're about to play with is undefined, just skip it! since we already fixed the stats, this should work perfectly
+        {
+          Vary = avgDev[i,j]^2;
+          ratioV = Vary/Varx;
+          xstar[i,j] = temp+(fitB[i,j]/(fitB[i,j]^2+ratioV))*(mn[i,j]-fitA[i,j]-fitB[i,j]*temp);
+          MSE[i,j] = MSE[i,j]+(1/(goodpoints[i,j]-2))*(temp - (mn[i,j]*fitB[i,j]+fitA[i,j]))^2;
+          SSR[i,j] = SSR[i,j] + 1/Vary^2*((mn[i,j]-fitA[i,j]-fitB[i,j]*xstar[i,j])^2+ratioV*(temp-xstar[i,j])^2);
+          TempDev[i,j] = TempDev[i,j] + Vary/fitB[i,j]^2 + Varx;
+          TempRes[i,j] = TempRes[i,j] + (mn[i,j]-fitA[i,j]-fitB[i,j]*xstar[i,j])^2/fitB[i,j]^2 + (temp-xstar[i,j])^2;
+          TempERR[i,j] = TempERR[i,j] + Varx + (temp-xstar[i,j])^2 + 1/fitB[i,j]^2 *(Vary + (mn[i,j]-fitA[i,j]-fitB[i,j]*xstar[i,j])^2);
+        }
+      }
+    }
+  }
+}
+
+
+
+
+
+
+// HERE WE GET THE AVG STD
+
+
+avgDev[1,1] = 0;
+avgDev.lname$ = "avg of StdDev at each temp";
+for(i=offsetX; i<dataLength; i+=dataSkip)
+{
+  for(j=offsetY; j<dataLength; j+=dataSkip)
+  {
+    dataset abb = {1}; // loose dataset to hold all the values at one temperature
+    abb.SetSize(totSheets);
+    loop(sheetnum,1,totSheets)   // 1 to N sheets of raw data, sheet name is temp related
+    {
+      string currentdatasheet$ = datasheets.GetAt(sheetnum)$;
+      dataset aa = {1}; // loose dataset to hold all the values at one temperature
+      aa.SetSize(runsPer);
+      loop(m,1,runsPer)
+      {
+        range mn = [MBook1]currentdatasheet$!$(m);
+        aa[m] = mn[i,j];
+      }
+      range mn2 = [MBook1]currentdatasheet$!$(runsPer+1);
+      mn2[i,j] = StdDev(aa);
+      abb[sheetnum] = StdDev(aa);
+    }
+    avgDev[i,j] = Mean(abb);
+  }
+}
+ 
+ //HERE BEGINS THE WHERE WE PICK THE RATIOS PART THAT MAXIMIZED THE THING
+
+// heres our list of inputs that act as cutoffs
+range sliceReqs = [Book2]Sheet2!B; 
+double maxSSR = sliceReqs[1];
+double minB = sliceReqs[2];
+double minWL = sliceReqs[3]-startWaveLen;
+double maxWL = sliceReqs[4]-startWaveLen;
+int inNumer = sliceReqs[5]-dataStartRow;
+int inDenom = sliceReqs[6]-dataStartRow;
+double maxMSE = sliceReqs[7];
+
+// we want to loop over the R^2 Matrix and find the largest R^2, later we will add a set of restrictions as we see need for
+int    BestSSRNumer = 0;
+int    BestSSRDenom = 0;
+double BestSSRslop =  0;
+double BestSSRint =   0;
+double BestSSRSSR =   maxSSR;
+double BestSSRMSE =   0;
+// also we want to loop over slope matrix and find highest slope
+int    BestBNumer = 0;
+int    BestBDenom = 0;
+double BestBslop =  minB;
+double BestBint =   0;
+double BestBSSR =   0;
+double BestBMSE =   0;
+//ALSO we want to loop over MSE matrix and find lowest MSE
+int    BestMNumer = 0;
+int    BestMDenom = 0;
+double BestMslop =  0;
+double BestMint =   0;
+double BestMSSR =   0;
+double BestMMSE =   maxMSE;
+
+
+
+
+range fitSSR = [MBook1]linfit$!21; // r2 (col4) is now actually WSSR (col(21))
+
+range MSE = [MBook1]linfit$!26;
+
+loop(ij,1,dataLength) // number of rows per data run
+{
+  loop(jj,1,dataLength) // number of rows per data run
+  {
+    if( (ij >minWL) & (jj >minWL) & (ij<maxWL) & (jj<maxWL) & (fitSSR[ij,jj] < maxSSR) & (fitB[ij,jj]>minB)& ( ij!=jj) )// here is where we would add other restrictions as necessary
+    {
+      if (fitSSR[ij,jj] < BestSSRSSR) // this IF is for the WSSR
+      {
+        BestSSRNumer = ij;
+        BestSSRDenom = jj; 
+        BestSSRslop =  fitB[ij,jj];
+        BestSSRint =   fitA[ij,jj];
+        BestSSRSSR =   fitSSR[ij,jj];
+        BestSSRMSE =   MSE[ij,jj];
+      }
+      if (abs(fitB[ij,jj]) > BestBslop) // this IF is for the B
+      {
+        BestBNumer =  ij;
+        BestBDenom =  jj; 
+        BestBslop =   fitB[ij,jj];
+        BestBint =    fitA[ij,jj];
+        BestBSSR =    fitSSR[ij,jj];
+        BestBMSE =    MSE[ij,jj];
+      }
+      if (abs(MSE[ij,jj]) < BestMMSE) // this IF is for the MSE
+      {
+        BestMNumer = ij;
+        BestMDenom = jj; 
+        BestMslop =  fitB[ij,jj];
+        BestMint =   fitA[ij,jj];
+        BestMSSR =   fitSSR[ij,jj];
+        BestMMSE =   MSE[ij,jj];
+      }
+    }
+  }
+}
+
+
+// lastly we will extract the Ratio Vs Temp graph for each
+range sliceTemp     = [Book2]Sheet2!C;      //
+range sliceSSR      = [Book2]Sheet2!D;     // the data
+range sliceSSRfit   = [Book2]Sheet2!E;    //  the associated linear fit
+range sliceB        = [Book2]Sheet2!F;   // / the data
+range sliceBfit     = [Book2]Sheet2!G;     // the associated fit
+range sliceChose    = [Book2]Sheet2!H;    //  the data
+range sliceChosefit = [Book2]Sheet2!I;   // / the associated fit
+range sliceMSE      = [Book2]Sheet2!J;     // the data
+range sliceMSEfit   = [Book2]Sheet2!K;    //  the associated fit
+
+
+string ratioSSR   = Ratio of $(BestSSRNumer) / $(BestSSRDenom);
+string ratioB     = Ratio of $(BestBNumer) / $(BestBDenom);
+string ratioChose = Ratio of $(inNumer) / $(inDenom);
+string ratioMSE   = Ratio of $(BestMNumer) / $(BestMDenom);
+
+sliceTemp[L]$     = Temperature;
+sliceSSR[L]$      = ratioSSR$;
+sliceSSRfit[L]$   = ratioSSR$;
+sliceB[L]$        = ratioB$;
+sliceBfit[L]$     = ratioB$;
+sliceChose[L]$    = ratioChose$;
+sliceChosefit[L]$ = ratioChose$;
+sliceMSE[L]$      = ratioMSE$;
+sliceMSEfit[L]$   = ratioMSE$;
+
+sliceTemp[U]$ = "C";
+//sliceSSR[U]$ = "";
+//sliceB[U]$ = "";
+//sliceWLen[C]$ = "";
+
+sliceSSR[C]$      = SSR $(inputWaves[BestSSRNumer+dataStartRow],%3f) / $(inputWaves[BestSSRDenom+dataStartRow],%3f) : SSR: $(BestSSRSSR,%5f) Slope: $(BestSSRslop,%5f) MSE: $(BestSSRMSE,%5f);
+sliceSSRfit[C]$   = Fit line for SSR;
+sliceB[C]$        = Slope $(inputWaves[BestBNumer+dataStartRow],%3f) / $(inputWaves[BestBDenom+dataStartRow],%3f) : SSR: $(BestBSSR,%5f) Slope: $(BestBslop,%5f) MSE: $(BestBMSE,%5f);
+sliceBfit[C]$     = Fit line for Slope;
+sliceChose[C]$    = Choice $(inputWaves[inNumer+dataStartRow],%3f) / $(inputWaves[inDenom+dataStartRow],%3f) :User Choice;
+sliceChosefit[C]$ = Fit line for User Choice;
+sliceMSE[C]$      = MSE $(inputWaves[BestMNumer+dataStartRow],%3f) / $(inputWaves[BestMDenom+dataStartRow],%3f) : SSR: $(BestMSSR,%5f) Slope: $(BestMslop,%5f) MSE: $(BestMMSE,%5f);
+sliceMSEfit[C]$   = fit line for least MSE;
+
+
+
+
+
+int counter = 1;
+loop(sheetnum,1,totSheets)
+{
+  string currentdatasheet$ = datasheets.GetAt(sheetnum)$;
+  string strTemp$ = datatemps.GetAt(sheetnum)$;
+  int temp = %(strTemp$);
+  
+  loop(m,1,runsPer)
+  {
+    range mn               = [MBook1]currentdatasheet$!$(m);
+    sliceTemp[counter]     = temp;
+    sliceSSR[counter]      = mn[BestSSRNumer,BestSSRDenom];
+    sliceSSRfit[counter]   = temp*BestSSRslop+BestSSRint;
+    sliceB[counter]        = mn[BestBNumer,BestBDenom];
+    sliceBfit[counter]     = temp*BestBslop+BestBint;
+    sliceChose[counter]    = mn[inNumer,inDenom];
+    sliceChosefit[counter] = (temp)*fitB[inNumer,inDenom]+fitA[inNumer,inDenom];
+    sliceMSE[counter]      = mn[BestMNumer,BestMDenom];
+    sliceMSEfit[counter]   = temp*BestMslop+BestMint;
+
+    counter = counter+1;
+  }
+}
+
+window -e Graph9;
+Plotxy iy:=((sliceTemp,sliceMSE,),(sliceTemp,sliceSSR,),(sliceTemp,sliceB),(sliceTemp,sliceChose)) plot:=201 ogl:=[Graph9]!1;
+Plotxy iy:=((sliceTemp,sliceMSEfit),(sliceTemp,sliceSSRfit),(sliceTemp,sliceBfit),(sliceTemp,sliceChosefit)) plot:=200 ogl:=[Graph9]!2;
